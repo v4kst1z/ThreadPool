@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <iostream>
 #include <thread>
@@ -26,16 +26,16 @@ public:
 	ThreadPool(const ThreadPool&) = delete;
 	ThreadPool& operator=(const ThreadPool&) = delete;
 private:
-	class BaseThread {
+	class BaseWork {
 	public:
-		virtual ~BaseThread() {}
+		virtual ~BaseWork() {}
 		virtual void operator()() = 0;
 	};
 
 	template <typename RT>
-	class Thread : public BaseThread {
+	class Work : public BaseWork {
 	public:
-		Thread(std::packaged_task<RT()> func) : func_(std::move(func)) {}
+		Work(std::packaged_task<RT()> func) : func_(std::move(func)) {}
 
 		void operator()() override {
 			func_();
@@ -49,7 +49,7 @@ private:
 	void ThreadManager();
 
 	std::condition_variable tp_cond_;
-	std::queue<std::unique_ptr<BaseThread>> tasks_;
+	std::queue<std::unique_ptr<BaseWork>> tasks_;
 	std::mutex tasks_mtx_;
 	std::vector<std::thread> thread_pool_;
 	std::atomic<bool> stop_;
@@ -57,7 +57,7 @@ private:
 };
 
 
-ThreadPool::ThreadPool(uint8_t num_threads): num_threads_(num_threads) {
+ThreadPool::ThreadPool(uint8_t num_threads) : num_threads_(num_threads) {
 	const uint8_t kMAX_THREADS = std::thread::hardware_concurrency() - 1;
 	if (num_threads_ > kMAX_THREADS)
 		num_threads_ = kMAX_THREADS;
@@ -76,7 +76,7 @@ inline auto ThreadPool::enqueue(Func&& f, Args && ...args) -> std::future<declty
 	std::future<ret_type> ret_future = tsk.get_future();
 	{
 		std::unique_lock<std::mutex> lck(tasks_mtx_);
-		tasks_.emplace(std::unique_ptr<BaseThread>(new Thread<ret_type>(std::move(tsk))));
+		tasks_.emplace(std::unique_ptr<BaseWork>(new Work<ret_type>(std::move(tsk))));
 	}
 	tp_cond_.notify_one();
 	return ret_future;
@@ -84,7 +84,7 @@ inline auto ThreadPool::enqueue(Func&& f, Args && ...args) -> std::future<declty
 
 inline void ThreadPool::ThreadManager() {
 	for (;;) {
-		std::unique_ptr<BaseThread> tsk;
+		std::unique_ptr<BaseWork> tsk;
 		{
 			std::unique_lock<std::mutex> lck(tasks_mtx_);
 			tp_cond_.wait(lck, [this]() { return stop_ || !tasks_.empty();  });
